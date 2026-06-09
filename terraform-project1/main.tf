@@ -1,126 +1,60 @@
-resource "azurerm_resource_group" "main" {
-  name     = "${var.rg_name}_resource"
-  location = var.location
+module "networking" {
+  source = "./modules/networking"
+
+  resource_group_name       = var.resource_group_name
+  location                  = var.location
+  vnet_name                 = var.vnet_name
+  nsg_name                  = var.nsg_name
+  vnet_address_space        = var.vnet_address_space
+  dns_servers               = var.dns_servers
+  web_subnet_name           = var.web_subnet_name
+  web_subnet_address_prefix = var.web_subnet_address_prefix
+  db_subnet_name            = var.db_subnet_name
+  db_subnet_address_prefix  = var.db_subnet_address_prefix
+  app_subnet_name           = var.app_subnet_name
+  app_subnet_address_prefix = var.app_subnet_address_prefix
 }
 
-resource "azurerm_storage_account" "main" {
-  name                     = "${var.rg_name}storage"
-  resource_group_name      = azurerm_resource_group.main.name
-  location                 = azure_resource_group.main.location
-  account_tier             = "Basic"
-  account_replication_type = "LRS"
+module "compute" {
+  source = "./modules/compute"
+
+  resource_group_name                = var.resource_group_name
+  location                           = var.location
+  azurerm_linux_virtual_machine_name = var.virtual_machine_name
+  azurerm_linux_virtual_machine_size = var.virtual_machine_size
+  admin_username                     = var.admin_username
+  admin_password                     = var.admin_password
+  os_disk_managed_disk_type          = var.os_disk_managed_disk_type
+  image_publisher                    = var.image_publisher
+  image_offer                        = var.image_offer
+  image_sku                          = var.image_sku
+  image_version                      = var.image_version
+  environment                        = var.environment
+  function_app_name                  = var.function_app_name
+  subnet_id                          = module.networking.app_subnet_id
+  key_vault_name                     = var.key_vault_name
 }
 
-resource "azurerm_container_registry" "acr" {
-  name                = var.container_registry_name
-  resource_group_name = azurerm_resource_group.main.name
-  location            = azurerm_resource_group.main.location
-  sku                 = "Basic"
-  admin_enabled       = true
-  }
+module "app_service" {
+  source     = "./modules/appservice"
+  depends_on = [module.networking]
 
-resource "azurerm_network_security_group" "main" {
-  name                = var.nsg_name
-  location            = azurerm_resource_group.main.location
-  resource_group_name = azurerm_resource_group.main.name
+  resource_group_name       = var.resource_group_name
+  location                  = var.location
+  app_service_plan_name     = var.app_service_plan_name
+  app_service_plan_sku_name = var.app_service_plan_sku_name
+  app_service_plan_os_type  = var.app_service_plan_os_type
 }
 
-resource "azurerm_virtual_network" "main" {
-  name                = var.vnet_name
-  location            = azurerm_resource_group.main.location
-  resource_group_name = azurerm_resource_group.main.name
-  address_space       = var.vnet_address_space
-  dns_servers         = var.dns_servers
-}
+module "storage" {
+  source     = "./modules/storage"
+  depends_on = [module.networking]
 
-resource "azurerm_subnet" "web" {
-  name                 = var.web_subnet_name
-  resource_group_name  = azurerm_resource_group.main.name
-  virtual_network_name = azurerm_virtual_network.main.name
-
-  address_prefixes     = [var.web_subnet_address_prefix]
-}
-
-resource "azurerm_subnet" "db" {
-  name                 = var.db_subnet_name
-  resource_group_name  = azurerm_resource_group.main.name
-  virtual_network_name = azurerm_virtual_network.main.name
-
-  address_prefixes     = [var.db_subnet_address_prefix]
-}
-
-resource "azurerm_subnet" "app" {
-  name                 = var.app_subnet_name
-  resource_group_name  = azurerm_resource_group.main.name
-  virtual_network_name = azurerm_virtual_network.main.name
-
-  address_prefixes     = [var.app_subnet_address_prefix]
-}
-
-resource "azurerm_virtual_network_peering" "web_to_app" {
-  name                      = var.rg_name + "-web-to-app-peering"
-  resource_group_name       = azurerm_resource_group.main.name
-  virtual_network_name      = azurerm_virtual_network.main.name
-  remote_virtual_network_id = azurerm_virtual_network.main.id
-  allow_forwarded_traffic   = true
-  allow_gateway_transit     = false
-  allow_virtual_network_access = true
-}
-
-resource "azurerm_virtual_machine" "main" {
-  name                  = "${var.virtual_machine_name}_vm1"
-  location              = azurerm_resource_group.main.location
-  resource_group_name   = azurerm_resource_group.main.name
-  network_interface_ids = [azurerm_network_interface.main.id]
-  vm_size               = var.virtual_machine_size
-
-  # Uncomment this line to delete the OS disk automatically when deleting the VM
-  delete_os_disk_on_termination = true
-
-  # Uncomment this line to delete the data disks automatically when deleting the VM
-  delete_data_disks_on_termination = true
-
-  storage_image_reference {
-    publisher = var.image_publisher
-    offer     = var.image_offer
-    sku       = var.image_sku
-    version   = var.image_version
-  }
-  storage_os_disk {
-    name              = var.virtual_machine_name + "_os_disk"
-    caching           = var.os_disk_caching
-    create_option     = var.os_disk_create_option
-    managed_disk_type = var.os_disk_managed_disk_type
-  }
-  os_profile {
-    computer_name  = var.computer_name
-    admin_username = var.admin_username
-    admin_password = var.admin_password
-  }
-  os_profile_linux_config {
-    disable_password_authentication = false
-  }
-  tags = {
-    environment = var.environment
-  }
-}
-
-resource "azurerm_service_plan" "main" {
-  name                = var.app_service_plan_name
-  resource_group_name = azurerm_resource_group.main
-  location            = azurerm_resource_group.main.location
-  os_type             = var.app_service_plan_os_type
-  sku_name            = var.app_service_plan_sku_name
-}
-
-resource "azurerm_linux_function_app" "example" {
-  name                = var.function_app_name
-  resource_group_name = azurerm_resource_group.main.name
-  location            = azurerm_resource_group.main.location
-
-  storage_account_name       = azurerm_storage_account.main
-  storage_account_access_key = azurerm_storage_account.main.primary_access_key
-  service_plan_id            = azurerm_service_plan.main.id
-
-  site_config {}
+  resource_group_name       = var.resource_group_name
+  location                  = var.location
+  account_tier              = var.account_tier
+  account_replication_type  = var.account_replication_type
+  storage_account_name      = var.storage_account_name
+  container_registry_name   = var.container_registry_name
+  app_service_plan_sku_name = var.app_service_plan_sku_name
 }
